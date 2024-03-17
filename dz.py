@@ -2,9 +2,22 @@ import json
 from pprint import pprint
 
 import requests
+import logging
 
+#ЛОГИРОВАНИЕ
+# Configure logging settings
+logging.basicConfig(filename='example.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Example of logging messages
+logging.debug('This is a debug message')
+logging.info('This is an info message')
+logging.warning('This is a warning message')
+logging.error('This is an error message')
+logging.critical('This is a critical message')
+
+#ID ПРИЛОЖЕНИЯ VK
 APP_ID = '51868951'
-access_token = ""
+
 class VK:
 
 
@@ -14,17 +27,30 @@ class VK:
         self.version = version
         self.params = {'access_token': self.token, 'v': self.version}
 
-    def users_info(self):
-        url = 'https://api.vk.com/method/users.get'
-        params = {'user_ids': self.id}
-        response = requests.get(url, params={**self.params, **params})
-        return response.json()
-
+# Получение списка фото с вк
     def get_photos(self):
         url = 'https://api.vk.com/method/photos.get'
         params = {'owner_id': self.id,'album_id': 'profile', 'extended':1, 'photo_sizes': 1}
         response = requests.get(url, params={**self.params, **params})
-        return response.json()
+        if response.status_code == 200 or response.status_code == 201:
+            logging.info("Photos saved")
+            return response.json()
+        else:
+            logging.error("Failed to save photo")
+
+# Сохранение информации о фото в файл json
+    def save_info_photos(self, photos_json):
+        list_photos = photos_json.get('response').get('items')
+        data = []
+        for i in range(len(list_photos)):
+            file_name = list_photos[i].get('likes').get('count')
+            file_url = list_photos[i].get('sizes')[-1].get('url')
+            file_size = {'height': list_photos[i].get('sizes')[-1].get('height'), 'width': list_photos[i].get('sizes')[-1].get('width')}
+            d = {'file name':file_name, 'file url': file_url, 'file_size':file_size}
+            data.append(d)
+        with open('info_photos.json', 'w') as file:
+            json.dump(data, file, indent=4)
+        logging.info("Photos are saved to the file info_photos.json")
 
 
 BASE_URL = 'https://cloud-api.yandex.net/v1/disk/'
@@ -36,31 +62,46 @@ class YANDEX:
         # self.version = version
         self.headers = {'Accept': 'application/json', 'Authorization': yandex_token}
 
-# получение ифнормации о диске
-    def get_info_disk(self):
-        response = requests.get(BASE_URL, headers=self.headers)
-        return response.json()
-
 # создание папки
     def create_resourse(self):
         path = 'Photos_VK'
         url = f'{BASE_URL}resources'
         params = {'path': path}
         response = requests.put(url,params=params, headers=self.headers)
-        return response
+        if response.status_code == 200 or response.status_code == 201:
+            logging.info('Folder created')
+            return True
+        elif response.status_code == 409:
+            logging.warning("A folder with the same name already exists")
+            return True
+        elif response.status_code == 401:
+            logging.error("User is not authorized")
+            return False
 
-    def upload_photos(self):
-        file = vk.get_photos().get('response').get('items')[0].get('sizes')[-1].get('url')
-        # file = "https://sun9-27.userapi.com/impf/5SUc_DEu4LauiTPoHB7SzPw56getZHzMU9iUtg/a3k8Xzy-9UA.jpg?size=562x562&quality=96&sign=428c164dbdc0485595a51d108b1064d7&c_uniq_tag=JxJqPYy6XQ4wuUvyFOLr1V9cXlipBBjwafGHm7yqa1o&type=album"
-        url = f"{BASE_URL}/resources/upload"
-        data = {'path':'/Photos_VK/11111.jpg', 'url': file}
-        response = requests.post(url, data=data, headers=self.headers)
-        return response
+# Загрузка файлов на яндекс диск
+    def upload_photos(self, n=5):
+        if self.create_resourse():
+            url = f"{BASE_URL}resources/upload"
+            with open('info_photos.json', 'r') as f:
+                data_photos = json.load(f)
+            for i in range(len(data_photos)):
+                data = {'path': f"/Photos_VK/count_likes-    {data_photos[i].get('file name')}.jpg", 'url': data_photos[i].get('file url')}
+                response = requests.post(url, params=data, headers=self.headers)
+                if response.status_code == 202:
+                    logging.info("Photo uploaded")
+                elif response.status_code == 401:
+                    logging.error("User is not authorized")
+                if i >= n-1:
+                    break
 
-user_id = '329645286'
+user_id = 'Your vk id'
+access_token = "Your VK token"
 vk = VK(access_token, user_id)
-yandex_token = ""
-# pprint(vk.get_photos())
+yandex_token = 'Your Yandex token'
+
+photos_json = vk.get_photos() # скачиваем фото с вк
+vk.save_info_photos(photos_json) # сохраняем информацию о фото в файл json
+
 client = YANDEX(yandex_token)
-client.create_resourse()
-pprint(client.upload_photos())
+
+pprint(client.upload_photos(4)) # загружаем фото из файла json  на яндекс диск
